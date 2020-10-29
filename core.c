@@ -134,19 +134,22 @@ void *mctp_pktbuf_alloc_end(struct mctp_pktbuf *pkt, size_t size)
 	return buf;
 }
 
-int mctp_pktbuf_push(struct mctp_pktbuf *pkt, void *data, size_t len)
+int mctp_pktbuf_push(struct mctp_pktbuf *pkt, const void *data, size_t len)
 {
+	int space = pkt->size - pkt->end;;
 	void *p;
 
-	if (pkt->end + len > pkt->size)
-		return -1;
+	if (space == 0)
+		return 0;
+	if (len > space)
+		len = space;
 
 	p = pkt->data + pkt->end;
 
 	pkt->end += len;
 	memcpy(p, data, len);
 
-	return 0;
+	return len;
 }
 
 /* Message reassembly */
