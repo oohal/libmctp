@@ -685,3 +685,21 @@ int mctp_message_tx(struct mctp *mctp, mctp_eid_t eid,
 	bus = find_bus_for_eid(mctp, eid);
 	return mctp_message_tx_on_bus(bus, bus->eid, eid, msg, msg_len);
 }
+
+
+int mctp_pldm_tx(struct mctp *mctp, mctp_eid_t eid, void *msg, size_t msg_len)
+{
+	struct mctp_pktbuf *pkt;
+	struct mctp_bus *bus;
+	uint8_t pldm_type = 0x01;
+
+	bus = find_bus_for_eid(mctp, eid);
+
+	pkt = mctp_packetize_start(bus, bus->eid, eid);
+	mctp_packetize_push(bus, &pkt, &pldm_type, 1);
+	mctp_packetize_push(bus, &pkt, msg, msg_len);
+	mctp_packetize_end(bus, pkt);
+
+	return 0;
+
+}

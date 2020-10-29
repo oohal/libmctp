@@ -96,6 +96,14 @@ int mctp_set_rx_all(struct mctp *mctp, mctp_rx_fn fn, void *data);
 int mctp_message_tx(struct mctp *mctp, mctp_eid_t eid,
 		void *msg, size_t msg_len);
 
+/*
+ * mctp_pldm_tx() - Send a PLDM message over MCTP
+ *
+ * Similar to mctp_message_tx() with the added feature of inserting the MCTP
+ * message type byte for a PLDM message at the start of the packet.
+ */
+int mctp_pldm_tx(struct mctp *mctp, mctp_eid_t eid, void *msg, size_t msg_len);
+
 
 struct mctp_pktbuf *mctp_packetize_start(struct mctp_bus *bus, mctp_eid_t src,
 					 mctp_eid_t dest);
