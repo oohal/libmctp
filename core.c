@@ -592,58 +592,87 @@ void mctp_binding_set_tx_enabled(struct mctp_binding *binding, bool enable)
 		mctp_send_tx_queue(bus);
 }
 
+static void mctp_packetize_queue_tx(struct mctp_bus *bus, struct mctp_pktbuf *pkt)
+{
+	if (bus->tx_queue_tail)
+		bus->tx_queue_tail->next = pkt;
+	else
+		bus->tx_queue_head = pkt;
+	bus->tx_queue_tail = pkt;
+}
+
+struct mctp_pktbuf *mctp_packetize_start(struct mctp_bus *bus, mctp_eid_t src,
+					 mctp_eid_t dest)
+{
+	struct mctp_hdr hdr = { 0 };
+	struct mctp_pktbuf *pkt;
+
+	hdr.ver = bus->binding->version & 0xf;
+	hdr.dest = dest;
+	hdr.src = src;
+	/* todo: tags */
+	hdr.flags_seq_tag = MCTP_HDR_FLAG_TO | (0 << MCTP_HDR_TAG_SHIFT);
+	hdr.flags_seq_tag |= MCTP_HDR_FLAG_SOM;
+
+	pkt = mctp_pktbuf_alloc(bus->binding, 0);
+	mctp_pktbuf_push(pkt, &hdr, sizeof(hdr));
+
+	return pkt;
+}
+
+void mctp_packetize_push(struct mctp_bus *bus, struct mctp_pktbuf **pkt,
+			       const void *buf, int len)
+{
+	struct mctp_hdr *hdr, *new_hdr;
+	struct mctp_pktbuf *new_pkt;
+	int next_seq;
+	int i, seq, pushed;
+
+	hdr = mctp_pktbuf_hdr(*pkt);
+
+	seq = (hdr->flags_seq_tag >> MCTP_HDR_SEQ_SHIFT) & MCTP_HDR_SEQ_MASK;
+
+	for (i = 0; i < len; i += pushed) {
+		pushed = mctp_pktbuf_push(*pkt, buf + i, len);
+		if (pushed)
+			continue;
+
+		new_pkt = mctp_pktbuf_alloc(bus->binding, 0);
+
+		/* copy the old header into the new packet */
+		mctp_pktbuf_push(new_pkt, hdr, sizeof(*hdr));
+		new_hdr = mctp_pktbuf_hdr(new_pkt);
+
+		/* fix flags */
+		seq = (seq + 1) & MCTP_HDR_SEQ_MASK;
+		new_hdr->flags_seq_tag = hdr->flags_seq_tag & MCTP_HDR_TAG_MASK;
+		new_hdr->flags_seq_tag |= seq << MCTP_HDR_SEQ_SHIFT;
+
+		mctp_packetize_queue_tx(bus, *pkt);
+
+		*pkt = new_pkt;
+		hdr = mctp_pktbuf_hdr(new_pkt);
+	}
+}
+
+void mctp_packetize_end(struct mctp_bus *bus, struct mctp_pktbuf *pkt)
+{
+	struct mctp_hdr *hdr = mctp_pktbuf_hdr(pkt);
+
+	hdr->flags_seq_tag |= MCTP_HDR_FLAG_EOM;
+	mctp_packetize_queue_tx(bus, pkt);
+
+	mctp_send_tx_queue(bus);
+}
+
 static int mctp_message_tx_on_bus(struct mctp_bus *bus, mctp_eid_t src,
 				  mctp_eid_t dest, void *msg, size_t msg_len)
 {
-	size_t max_payload_len, payload_len, p;
 	struct mctp_pktbuf *pkt;
-	struct mctp_hdr *hdr;
-	int i;
 
-	max_payload_len = bus->binding->pkt_size - sizeof(*hdr);
-
-	mctp_prdebug("%s: Generating packets for transmission of %zu byte message from %hhu to %hhu",
-		     __func__, msg_len, src, dest);
-
-	/* queue up packets, each of max MCTP_MTU size */
-	for (p = 0, i = 0; p < msg_len; i++) {
-		payload_len = msg_len - p;
-		if (payload_len > max_payload_len)
-			payload_len = max_payload_len;
-
-		pkt = mctp_pktbuf_alloc(bus->binding,
-				payload_len + sizeof(*hdr));
-		hdr = mctp_pktbuf_hdr(pkt);
-
-		/* todo: tags */
-		hdr->ver = bus->binding->version & 0xf;
-		hdr->dest = dest;
-		hdr->src = src;
-		hdr->flags_seq_tag = MCTP_HDR_FLAG_TO |
-			(0 << MCTP_HDR_TAG_SHIFT);
-
-		if (i == 0)
-			hdr->flags_seq_tag |= MCTP_HDR_FLAG_SOM;
-		if (p + payload_len >= msg_len)
-			hdr->flags_seq_tag |= MCTP_HDR_FLAG_EOM;
-		hdr->flags_seq_tag |=
-			(i & MCTP_HDR_SEQ_MASK) << MCTP_HDR_SEQ_SHIFT;
-
-		memcpy(mctp_pktbuf_data(pkt), msg + p, payload_len);
-
-		/* add to tx queue */
-		if (bus->tx_queue_tail)
-			bus->tx_queue_tail->next = pkt;
-		else
-			bus->tx_queue_head = pkt;
-		bus->tx_queue_tail = pkt;
-
-		p += payload_len;
-	}
-
-	mctp_prdebug("%s: Enqueued %d packets", __func__, i);
-
-	mctp_send_tx_queue(bus);
+	pkt = mctp_packetize_start(bus, src, dest);
+	mctp_packetize_push(bus, &pkt, msg, msg_len);
+	mctp_packetize_end(bus, pkt);
 
 	return 0;
 }

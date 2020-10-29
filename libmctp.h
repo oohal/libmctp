@@ -96,6 +96,13 @@ int mctp_set_rx_all(struct mctp *mctp, mctp_rx_fn fn, void *data);
 int mctp_message_tx(struct mctp *mctp, mctp_eid_t eid,
 		void *msg, size_t msg_len);
 
+
+struct mctp_pktbuf *mctp_packetize_start(struct mctp_bus *bus, mctp_eid_t src,
+					 mctp_eid_t dest);
+void mctp_packetize_push(struct mctp_bus *bus, struct mctp_pktbuf **pkt,
+			 const void *buf, int len);
+void mctp_packetize_finish(struct mctp_bus *bus, struct mctp_pktbuf *pkt);
+
 /* hardware bindings */
 struct mctp_binding {
 	const char *name;
